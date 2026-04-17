@@ -1,0 +1,9 @@
+job                 node-a (s)    node-b (s)      slowdown b/a
+--------------------------------------------------------------
+streamcluster            124.0         209.0             1.69x
+freqmine                 110.0         213.0             1.94x
+canneal                   98.0         118.0             1.20x
+barnes                    32.0          55.0             1.72x
+vips                      28.0          54.0             1.93x
+blackscholes              46.0          39.0             0.85x
+radix                     11.0           OOM                 —
