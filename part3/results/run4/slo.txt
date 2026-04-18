@@ -1,0 +1,8 @@
+window start (UTC epoch s): 1776500751
+window end   (UTC epoch s): 1776500988
+window duration          : 237.0 s
+mcperf rows (total)      : 24
+mcperf rows (in window)  : 20
+violations (p95 > 1ms)   : 0
+SLO violation ratio      : 0.0000
+p95 min/avg/max (us)     : 322 / 345 / 362

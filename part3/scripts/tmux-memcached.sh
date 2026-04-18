@@ -48,10 +48,16 @@ orig_pane=$(tmux display -p '#{pane_id}')
 tmux split-window -v -p 60 -c "#{pane_current_path}"
 tmux send-keys "${SSH}${agent_a_node}" Enter
 
-tmux split-window -h -p 67 -c "#{pane_current_path}"
+# Goal for the bottom row: agent-a 25% | agent-b 25% | measure 50%.
+#
+# 1. Split current (agent-a, 100%) so the new right pane is 75% of it:
+#    → agent-a = 25%, new empty pane = 75%. Active = new.
+# 2. Put agent-b in this 75% pane, then split it so new right is 67% of 75%:
+#    → agent-b keeps 33% of 75% ≈ 25% of row, measure gets 67% of 75% ≈ 50%.
+tmux split-window -h -p 75 -c "#{pane_current_path}"
 tmux send-keys "${SSH}${agent_b_node}" Enter
 
-tmux split-window -h -p 50 -c "#{pane_current_path}"
+tmux split-window -h -p 67 -c "#{pane_current_path}"
 tmux send-keys "${SSH}${measure_node}" Enter
 
 tmux select-pane -t "${orig_pane}"

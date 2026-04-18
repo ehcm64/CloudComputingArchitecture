@@ -1,0 +1,11 @@
+job                         wait (s)     run (s)     total (s)
+--------------------------------------------------------------
+parsec-radix                     1.0        12.0          13.0
+parsec-freqmine                  1.0       139.0         140.0
+parsec-barnes                  145.0        77.0         222.0
+parsec-streamcluster             1.0       268.0         269.0
+parsec-vips                    144.0        59.0         203.0
+parsec-blackscholes              1.0        61.0          62.0
+parsec-canneal                   1.0       135.0         136.0
+--------------------------------------------------------------
+MAKESPAN (wall)                                          286.0

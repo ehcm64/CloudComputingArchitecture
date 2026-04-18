@@ -1,0 +1,11 @@
+job                     node                                        wait (s)     run (s)     total (s)
+------------------------------------------------------------------------------------------------------
+parsec-canneal          node-b-4core-xkbd                                2.0       160.0         162.0
+parsec-blackscholes     node-b-4core-xkbd                                1.0       106.0         107.0
+parsec-radix            node-a-8core-z604                                1.0         6.0           7.0
+parsec-vips             node-b-4core-xkbd                                2.0       135.0         137.0
+parsec-freqmine         node-a-8core-z604                                1.0        98.0          99.0
+parsec-streamcluster    node-a-8core-z604                                1.0       179.0         180.0
+parsec-barnes           node-a-8core-z604                               98.0        51.0         149.0
+------------------------------------------------------------------------------------------------------
+MAKESPAN (wall)                                                                                  192.0
