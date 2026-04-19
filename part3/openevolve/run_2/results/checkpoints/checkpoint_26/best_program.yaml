@@ -1,0 +1,37 @@
+# Scheduling policy for Part 3 of the CCA project.
+# OpenEvolve will mutate only the block between EVOLVE-BLOCK-START and
+# EVOLVE-BLOCK-END. The evaluator reads this file, renders a Kubernetes Job
+# for each entry in `jobs:` using job_template.yaml, and then walks the
+# `schedule:` DSL one action at a time.
+#
+# Schedule DSL (one string per list entry):
+#   submit <job-name>   # kubectl apply the job (non-blocking)
+#   sleep  <seconds>    # wall-clock sleep before the next action
+#   wait   <job-name>   # kubectl wait --for=condition=complete on that job
+#
+# Rules the evaluator enforces (violating any -> infeasibility score):
+#   - every key in `jobs:` must be submitted exactly once by the schedule
+#   - only the three tokens above are legal
+#   - `image` and job-name keys must stay as-is (pinned by the project spec)
+
+# EVOLVE-BLOCK-START
+jobs:
+  parsec-barnes:        {node: node-a-8core, cpuset: "",    threads: 4, suite: splash2x, benchmark: barnes,        image: "anakli/cca:splash2x_barnes",        cpu_request: "2",    cpu_limit: "4",  memory_request: "4Gi",   memory_limit: "12Gi"}
+  parsec-blackscholes:  {node: node-b-4core, cpuset: "0-1", threads: 2, suite: parsec,   benchmark: blackscholes,  image: "anakli/cca:parsec_blackscholes",    cpu_request: "400m", cpu_limit: "2",  memory_request: "512Mi", memory_limit: "2Gi"}
+  parsec-canneal:       {node: node-b-4core, cpuset: "",    threads: 4, suite: parsec,   benchmark: canneal,       image: "anakli/cca:parsec_canneal",         cpu_request: "1",    cpu_limit: "3",  memory_request: "512Mi", memory_limit: "2Gi"}
+  parsec-freqmine:      {node: node-a-8core, cpuset: "",    threads: 4, suite: parsec,   benchmark: freqmine,      image: "anakli/cca:parsec_freqmine",        cpu_request: "2000m",cpu_limit: "4",  memory_request: "2Gi",   memory_limit: "6Gi"}
+  parsec-radix:         {node: node-a-8core, cpuset: "",    threads: 8, suite: splash2x, benchmark: radix,         image: "anakli/cca:splash2x_radix",         cpu_request: "6",    cpu_limit: "8",  memory_request: "4Gi",   memory_limit: "30Gi"}
+  parsec-streamcluster: {node: node-a-8core, cpuset: "",    threads: 8, suite: parsec,   benchmark: streamcluster, image: "anakli/cca:parsec_streamcluster",   cpu_request: "4",    cpu_limit: "8",  memory_request: "4Gi",   memory_limit: "12Gi"}
+  parsec-vips:          {node: node-b-4core, cpuset: "",    threads: 4, suite: parsec,   benchmark: vips,          image: "anakli/cca:parsec_vips",            cpu_request: "500m", cpu_limit: "3",  memory_request: "1Gi",   memory_limit: "2Gi"}
+
+schedule:
+  - "submit parsec-radix"
+  - "submit parsec-blackscholes"
+  - "submit parsec-vips"
+  - "wait parsec-radix"
+  - "submit parsec-canneal"
+  - "submit parsec-freqmine"
+  - "sleep 1"
+  - "submit parsec-streamcluster"
+  - "submit parsec-barnes"
+# EVOLVE-BLOCK-END
