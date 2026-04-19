@@ -5,7 +5,7 @@ checkpoint_interval: 1 # Do not change this
 
 llm:
   api_base: "https://api.swissai.cscs.ch/v1"
-  primary_model: "<your model>"
+  primary_model: "meta-llama/Llama-3.3-70B-Instruct"
   top_p: 0.7 # Feel free to experiment with this value
   # Possible additional parameters to configure the LLM:
   # temperature: 
@@ -13,15 +13,8 @@ llm:
   # timeout: 
 
 prompt:
-  # Prompts to provide the LLM with. You can directly write the prompt in the config, e.g.
-  # system_message: |
-  #   You are an expert programmer tasked with optimizing the following code...
-  #
-  # Alternatively, you can create files containing the prompts, and reference them here, e.g.
-  # template_dir: "<path-to-prompt-directory>"
-  # system_message: "name_of_file"
-  #
-  # The system message will be the content of the file <path-to-prompt-directory>/name_of_file.txt
+  template_dir: "."
+  system_message: "system_message"
 
 # You can learn more about these and other parameters here: https://github.com/algorithmicsuperintelligence/openevolve/blob/main/configs/default_config.yaml
 database:

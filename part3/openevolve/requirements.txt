@@ -1,1 +1,2 @@
 openevolve==0.2.26
+PyYAML>=6.0

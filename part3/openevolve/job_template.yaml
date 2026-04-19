@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {name}
+  labels:
+    name: {name}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      containers:
+      - image: {image}
+        name: {name}
+        imagePullPolicy: Always
+        command: ["/bin/sh"]
+        args: ["-c", "{prefix}./run -a run -S {suite} -p {benchmark} -i native -n {threads}"]
+        resources:
+          requests:
+            cpu: "{cpu_request}"
+            memory: "{memory_request}"
+          limits:
+            cpu: "{cpu_limit}"
+            memory: "{memory_limit}"
+      restartPolicy: Never
+      nodeSelector:
+        cca-project-nodetype: "{node}"

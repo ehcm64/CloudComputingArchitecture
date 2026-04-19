@@ -1,0 +1,58 @@
+You are optimizing a Kubernetes scheduling policy for a Cloud Computing Architecture lab.
+
+Goal
+----
+Minimize the makespan of 7 PARSEC/SPLASH batch jobs that run in a Kubernetes cluster alongside a latency-critical memcached service. The memcached service must stay below 1 ms at the 95th percentile under a constant 30,000 QPS load for the entire time the batch jobs are running. A single SLO violation in that window voids the whole schedule (the evaluator returns a huge penalty score), so SLO adherence is strictly more important than speed.
+
+You are editing the YAML block between `# EVOLVE-BLOCK-START` and `# EVOLVE-BLOCK-END`. Anything outside that block is invisible to you. The file is parsed with `yaml.safe_load`; invalid YAML = infeasible = huge penalty.
+
+Cluster (fixed, do not try to change)
+-------------------------------------
+- node-a-8core: e2-standard-8 (8 vCPU, 32 GiB). Labelled cca-project-nodetype=node-a-8core. No memcached. Plenty of room.
+- node-b-4core: n2d-highcpu-4 (4 vCPU, ~4 GiB). Labelled cca-project-nodetype=node-b-4core. **memcached runs here and reserves 1500m CPU + 1 GiB mem**, so at most ~2.5 cores and ~3 GiB are free for batch work on node-b.
+- memcached itself is a long-running Pod (not a Job) that you do not control — treat it as immovable background load on node-b.
+
+Per-job intuition (from Part 1 and Part 2 of the project)
+---------------------------------------------------------
+- radix (splash2x, memory-bandwidth heavy): native dataset OOMs on node-b when memcached is co-resident. Must run on node-a. Scales well to 8 threads. Tends to disturb memcached via memory-bandwidth interference; safest to run it alone on node-a and ideally while memcached is lightly loaded.
+- canneal (parsec, memory heavy, working set > LLC): fits on node-b alongside memcached. Does not dramatically hurt memcached p95 there. Scales modestly with threads.
+- freqmine (parsec): scales nearly linearly up to 8 threads; benefits from the whole node-a. Memory-friendly to memcached.
+- streamcluster (parsec): scales well to 8 threads but is somewhat cache-sensitive; co-locating with freqmine on node-a slows both down but the parallelism is usually still a win.
+- blackscholes (parsec): small, short. Pin it to a couple of node-b cores so it doesn't fight memcached for scheduling.
+- vips (parsec): short, not very sensitive. Fine on either node but typically node-b to leave node-a free for the large jobs.
+- barnes (splash2x): short, compute-bound. Can ride along on node-a with leftover cores at the end.
+
+Levers you can pull inside the EVOLVE-BLOCK
+-------------------------------------------
+Inside `jobs:` (per-job):
+- `node`: either "node-a-8core" or "node-b-4core". Changing placement of big jobs changes the whole makespan.
+- `cpuset`: Linux cpu-list string passed to `taskset -c`, e.g. "0-3" or "2,3". Empty string means no pinning. Pinning is useful to carve node-b into memcached's half (cores 0-1, do not touch) and a batch half (cores 2-3).
+- `threads`: integer for PARSEC's `-n` argument. Higher = more parallelism, higher = more interference.
+- `cpu_request` / `cpu_limit`: Kubernetes resource strings (e.g. "400m", "2", "6"). Requests must fit on the chosen node (after memcached's 1500m on node-b). If requests don't fit, Kubernetes will leave the Pod Pending and the evaluator times out = infeasible.
+- `memory_request` / `memory_limit`: strings like "512Mi", "4Gi". Respect node-b's ~4 GiB ceiling.
+
+Inside `schedule:` (list of action strings, executed top-to-bottom):
+- `submit <job-name>`: kubectl apply; returns immediately. The job runs when Kubernetes places it.
+- `wait <job-name>`: block until that job's Pod reaches condition=complete.
+- `sleep <seconds>`: wall-clock delay (float allowed).
+
+You must submit every job listed in `jobs:` exactly once. Reordering, inserting waits, and inserting sleeps are the main tools for controlling interference.
+
+Hard rules (breaking any = infeasibility score)
+----------------------------------------------
+- Do not change a job's `image` value.
+- Do not change the top-level keys `jobs` / `schedule`, do not rename a job.
+- Do not put `parsec-radix` on node-b-4core.
+- Do not submit a job twice or forget a job.
+- Do not add new DSL verbs beyond `submit` / `wait` / `sleep`.
+
+Optimization hints
+------------------
+- The baseline policy (the initial file) finishes in ~240 s with 0 SLO violations. Your job is to beat that.
+- Pack node-b early with cheap, SLO-friendly small jobs (blackscholes, vips, canneal) so node-a stays dedicated to the expensive ones.
+- Running radix first, alone on node-a, frees node-a for the later parallel-heavy duo (freqmine + streamcluster). Alternative: run freqmine/streamcluster first, save radix for the tail — try both.
+- Shorter wait chains + more parallelism reduce makespan, but too much concurrent memory pressure on node-b will push memcached over 1 ms. When in doubt, err toward smaller cpu_limit / fewer threads on node-b co-tenants.
+
+Output format
+-------------
+Return only the full YAML file with your mutations applied inside the EVOLVE-BLOCK, preserving the marker lines exactly. Do not add commentary outside the file.
