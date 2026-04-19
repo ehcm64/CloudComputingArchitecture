@@ -30,7 +30,8 @@ import yaml
 from openevolve.evaluation_result import EvaluationResult
 
 # Allow importing Part 3.1 helpers without duplicating their logic.
-_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+# This file lives at part3/openevolve/run_N/evaluator.py, so parents[2] = part3/.
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from slo_violations import parse_mcperf, SLO_US  # noqa: E402
