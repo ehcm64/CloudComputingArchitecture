@@ -1,0 +1,35 @@
+# By default, your evolution will run for 50 iterations; feel free to change this value as needed.
+# At any time, you can resume evolution from a specific checkpoint by providing the --checkpoint flag to openevolve-run.
+max_iterations: 50
+checkpoint_interval: 1 # Do not change this
+
+llm:
+  api_base: "https://api.swissai.cscs.ch/v1"
+  primary_model: "meta-llama/Llama-3.3-70B-Instruct"
+  top_p: 0.7 # Feel free to experiment with this value
+  # Possible additional parameters to configure the LLM:
+  # temperature: 
+  # max_tokens: 
+  # timeout: 
+
+prompt:
+  template_dir: "."
+  system_message: "system_message"
+
+# You can learn more about these and other parameters here: https://github.com/algorithmicsuperintelligence/openevolve/blob/main/configs/default_config.yaml
+database:
+  population_size: 200 # Do not change this
+  # Relevant parameters:
+  # num_islands: 
+  # elite_selection_ratio: 
+  # exploitation_ratio: 
+
+# Evaluator configuration
+evaluator:
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  # Relevant parameters:
+  # timeout: 
+
+diff_based_evolution: true
+max_code_length: 50000
