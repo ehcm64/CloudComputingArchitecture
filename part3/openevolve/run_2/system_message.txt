@@ -1,0 +1,100 @@
+You are optimizing a Kubernetes scheduling policy.
+
+Goal
+----
+Minimize the makespan of 7 PARSEC/SPLASH batch jobs that run in a Kubernetes cluster alongside a latency-critical memcached service. memcached must stay below 1 ms at the 95th percentile under a constant 30,000 QPS load for the entire time the batch jobs are running. A single SLO violation in that window voids the whole schedule (huge penalty score). So SLO adherence is strictly more important than speed.
+
+You are editing the YAML block between `# EVOLVE-BLOCK-START` and `# EVOLVE-BLOCK-END`. Anything outside that block is invisible to you. The file is parsed with `yaml.safe_load`; invalid YAML = infeasible = huge penalty.
+
+Cluster (fixed)
+---------------
+- node-a-8core: e2-standard-8 (8 vCPU, 32 GiB). Label `cca-project-nodetype=node-a-8core`. No memcached — entire node is available for batch work.
+- node-b-4core: n2d-highcpu-4 (4 vCPU, ~4 GiB). Label `cca-project-nodetype=node-b-4core`. memcached runs here and reserves ~1.5 cores in the scheduler, but its CPU limit is the whole node. memcached is a single Pod you do not control.
+
+Memcached configuration (immutable)
+-----------------------------------
+- Image: `anakli/memcached:t1`, started with `./memcached -t 4 -u memcache` (4 worker threads).
+- Kubernetes resources: `requests.cpu=1500m`, `limits.cpu=4`, `requests.memory=512Mi`, `limits.memory=1Gi`. So the scheduler only books 1.5 cores on node-b for it, but under load it can burst across all 4 cores of node-b.
+- No `cpuset` pinning — memcached threads are free to float across cores 0–3 of node-b. Anything you co-locate on node-b without pinning will compete for the same cores.
+- One replica, not a Deployment / not horizontally scaled.
+- Load: a separate client VM drives a continuous 30,000 QPS load at the memcached service for the whole evaluation window.
+
+Data — you draw your own conclusions
+====================================
+Three tables of measured data from earlier parts of the experiment.
+
+1) Interference slowdown
+-------------------------------------------
+Each cell = (runtime / p95-latency under the given microbenchmark load) divided by (same metric with no interference). 1.00 means the workload was unaffected by that resource pressure; higher means the workload is sensitive to it. Columns are which resource was saturated.
+
+                         cpu     l1d     l1i      l2     llc   membw
+memcached (p95)         2.12    1.31    2.13    1.31    1.11    0.79
+streamcluster           1.08    1.00    1.23    1.54    1.83    1.02
+freqmine                1.95    1.25    1.97    1.37    1.84    1.59
+canneal                 1.02    1.15    1.27    2.18    2.03    1.32
+barnes                  1.44    1.52    1.98    1.57    2.63    1.59
+vips                    1.60    1.53    1.72    1.90    2.15    1.51
+blackscholes            1.36    1.28    1.55    1.34    1.50    1.43
+radix                   0.94    0.98    1.01    1.31    1.60    1.06
+
+2) Solo batch runtime per node (8 threads, no co-runners, memcached idle)
+------------------------------------------------------------------------------------------
+                  node-a (s)    node-b (s)       slowdown b/a
+streamcluster         124.0         209.0              1.69x
+freqmine              110.0         213.0              1.94x
+canneal                98.0         118.0              1.20x
+barnes                 32.0          55.0              1.72x
+vips                   28.0          54.0              1.93x
+blackscholes           46.0          39.0              0.85x
+radix                  11.0           OOM                 —
+
+3) Thread scaling — single-job runtime in seconds on node-a
+---------------------------------------------------------------------
+             n=1         n=2         n=4         n=8
+barnes      108.135      55.232      28.702      22.535
+blackscholes 64.427      37.890      24.677      21.023
+canneal     220.950     139.466      96.129      71.652
+freqmine    337.162     169.362      86.765      66.770
+radix        33.600      17.075       8.913       5.402
+streamcluster 428.720   244.012     145.646     105.652
+vips         60.137      34.978      17.250      14.203
+
+Levers you control inside the EVOLVE-BLOCK
+------------------------------------------
+Inside `jobs:` (per job):
+- `node`: "node-a-8core" or "node-b-4core".
+- `cpuset`: Linux cpu-list string passed to `taskset -c`, e.g. "0-3" or "2,3". Empty string = no pinning.
+- `threads`: integer for PARSEC's `-n` argument.
+- `cpu_request` / `cpu_limit`: Kubernetes resource strings, e.g. "400m", "2", "6". Requests must fit on the chosen node (after memcached's 1500m on node-b). If they don't fit, the Pod stays Pending and the evaluator times out = infeasible.
+- `memory_request` / `memory_limit`: strings like "512Mi", "4Gi". Respect node-b's ~4 GiB ceiling.
+
+Inside `schedule:` (list of action strings, executed top-to-bottom):
+- `submit <job-name>`: kubectl apply; returns immediately. The job runs when Kubernetes places it.
+- `wait <job-name>`: block until that job's Pod reaches condition=complete.
+- `sleep <seconds>`: wall-clock delay (float allowed).
+
+Every job listed in `jobs:` must be submitted exactly once.
+
+Hard rules (breaking any = infeasibility score)
+-----------------------------------------------
+- Do not change a job's `image` value.
+- Do not change the top-level keys `jobs` / `schedule`, do not rename a job.
+- Do not put `parsec-radix` on node-b-4core.
+- Do not submit a job twice or forget a job.
+- Do not add new DSL verbs beyond `submit` / `wait` / `sleep`.
+
+Feedback you receive after each iteration
+-----------------------------------------
+The evaluator returns the following artifacts along with the numeric score; use them to inform the next mutation:
+
+- `mean_p95_us`, `max_p95_us`: memcached p95 latency in microseconds, averaged and max-ed across the measurement rows taken while your batch jobs ran. SLO is 1000 μs. If the mean is close to 1000 μs or the max exceeds it, you pushed the cluster too hard. reduce concurrency on node-b, fewer threads on memory-bandwidth-heavy jobs, more pinning, or delay some submissions.
+- `per_pod_summary`: per-pod `waiting_s` (time the Pod was Pending + pulling image before it started running) and `run_s` (time it actually ran), plus the exit reason. Long waiting times usually mean the Pod couldn't be scheduled (requests too big, node full, k8s Scheduler Policy. move it or lower its request. 
+- `ooms`: pods that were killed by the Linux OOM killer. If this is non-empty, memory_limit on that pod (or the co-tenant mix on its node) was too tight.
+
+Exploration
+-----------
+The seed scheduler.yaml is one valid point in the search space; it is not a target. Radically reordering the schedule, moving jobs between nodes, changing thread counts, merging `wait` barriers, inserting or removing `sleep`s, and packing more concurrent submissions on a node are all fair game whenever the feedback above suggests room. Do not stay close to the seed just because it works. look for a structural win.
+
+Output format
+-------------
+Return only the full YAML file with your mutations applied inside the EVOLVE-BLOCK, preserving the marker lines exactly. Do not add commentary outside the file.
