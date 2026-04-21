@@ -1,0 +1,128 @@
+You are optimizing a Kubernetes scheduling policy.
+
+Goal
+----
+Minimize the makespan of 7 PARSEC/SPLASH batch jobs that run in a Kubernetes cluster alongside a latency-critical memcached service. memcached must stay below 1 ms at the 95th percentile under a constant 30,000 QPS load for the entire time the batch jobs are running. A single SLO violation in that window voids the whole schedule (huge penalty score). So SLO adherence is strictly more important than speed.
+
+Scoring (exact formula)
+-----------------------
+Score is negative; closer to 0 is better. Three tiers:
+- Feasible run (all 7 jobs completed, 0 SLO violations):
+      score = -(makespan_s + total_excess_s)
+- SLO-violated run (any mcperf row in window > 1 ms):
+      score = -(makespan_s + 10000 + total_excess_s)   # +10000 s cliff
+- Soft-deadline hit (evaluator stopped the run early because something was stuck):
+      score = -(elapsed_s + total_excess_s)            # no mcperf sampled
+`total_excess_s = sum over jobs of max(0, observed_s - baseline_s)`, where
+`baseline_s` is the job's solo runtime on its chosen node (table below).
+Takeaway: a job that runs 30 s over its baseline costs the same 30 s whether
+it extended the makespan or not, so the penalty points a finger at WHICH pod
+was starved/interfered with — not just "the schedule was slow". Reducing any
+single pod's run-time improves the score, even when makespan is fixed by a
+different straggler.
+
+You are editing the YAML block between `# EVOLVE-BLOCK-START` and `# EVOLVE-BLOCK-END`. Anything outside that block is invisible to you. The file is parsed with `yaml.safe_load`; invalid YAML = infeasible = huge penalty.
+
+Cluster (fixed)
+---------------
+- node-a-8core: e2-standard-8 (8 vCPU, 32 GiB). Label `cca-project-nodetype=node-a-8core`. No memcached — entire node is available for batch work.
+- node-b-4core: n2d-highcpu-4 (4 vCPU, ~4 GiB). Label `cca-project-nodetype=node-b-4core`. memcached runs here and reserves ~1.5 cores in the scheduler, but its CPU limit is the whole node. memcached is a single Pod you do not control.
+
+Memcached configuration (immutable)
+-----------------------------------
+- Image: `anakli/memcached:t1`, started with `./memcached -t 4 -u memcache` (4 worker threads).
+- Kubernetes resources: `requests.cpu=1500m`, `limits.cpu=4`, `requests.memory=512Mi`, `limits.memory=1Gi`. So the scheduler only books 1.5 cores on node-b for it, but under load it can burst across all 4 cores of node-b.
+- No `cpuset` pinning — memcached threads are free to float across cores 0–3 of node-b. Anything you co-locate on node-b without pinning will compete for the same cores.
+- One replica, not a Deployment / not horizontally scaled.
+- Load: a separate client VM drives a continuous 30,000 QPS load at the memcached service for the whole evaluation window.
+
+Data — you draw your own conclusions
+====================================
+Three tables of measured data from earlier parts of the experiment.
+
+1) Interference slowdown
+-------------------------------------------
+Each cell = (runtime / p95-latency under the given microbenchmark load) divided by (same metric with no interference). 1.00 means the workload was unaffected by that resource pressure; higher means the workload is sensitive to it. Columns are which resource was saturated.
+
+                         cpu     l1d     l1i      l2     llc   membw
+memcached (p95)         2.12    1.31    2.13    1.31    1.11    0.79
+streamcluster           1.08    1.00    1.23    1.54    1.83    1.02
+freqmine                1.95    1.25    1.97    1.37    1.84    1.59
+canneal                 1.02    1.15    1.27    2.18    2.03    1.32
+barnes                  1.44    1.52    1.98    1.57    2.63    1.59
+vips                    1.60    1.53    1.72    1.90    2.15    1.51
+blackscholes            1.36    1.28    1.55    1.34    1.50    1.43
+radix                   0.94    0.98    1.01    1.31    1.60    1.06
+
+2) Solo batch runtime per node (8 threads, no co-runners, memcached idle)
+------------------------------------------------------------------------------------------
+                  node-a (s)    node-b (s)       slowdown b/a
+streamcluster         124.0         209.0              1.69x
+freqmine              110.0         213.0              1.94x
+canneal                98.0         118.0              1.20x
+barnes                 32.0          55.0              1.72x
+vips                   28.0          54.0              1.93x
+blackscholes           46.0          39.0              0.85x
+radix                  11.0           OOM                 —
+
+3) Thread scaling — single-job runtime in seconds on node-a
+---------------------------------------------------------------------
+             n=1         n=2         n=4         n=8
+barnes      108.135      55.232      28.702      22.535
+blackscholes 64.427      37.890      24.677      21.023
+canneal     220.950     139.466      96.129      71.652
+freqmine    337.162     169.362      86.765      66.770
+radix        33.600      17.075       8.913       5.402
+streamcluster 428.720   244.012     145.646     105.652
+vips         60.137      34.978      17.250      14.203
+
+Levers you control inside the EVOLVE-BLOCK
+------------------------------------------
+Inside `jobs:` (per job):
+- `node`: "node-a-8core" or "node-b-4core".
+- `cpuset`: Linux cpu-list string passed to `taskset -c`, e.g. "0-3" or "2,3". Empty string = no pinning.
+- `threads`: integer for PARSEC's `-n` argument.
+- `cpu_request` / `cpu_limit`: Kubernetes resource strings, e.g. "400m", "2", "6". Requests must fit on the chosen node (after memcached's 1500m on node-b). If they don't fit, the Pod stays Pending and the evaluator times out = infeasible.
+- `memory_request` / `memory_limit`: strings like "512Mi", "4Gi". Respect node-b's ~4 GiB ceiling.
+
+Inside `schedule:` (list of action strings, executed top-to-bottom):
+- `submit <job-name>`: kubectl apply; returns immediately. The job runs when Kubernetes places it.
+- `sleep <seconds>`: wall-clock delay (float allowed).
+
+Every job listed in `jobs:` must be submitted exactly once. After the schedule is exhausted the evaluator joins every submitted job — you do not need (and cannot issue) an explicit wait. Ordering between two jobs is expressed by either (a) a `sleep` between their submits, or (b) giving them `cpu_request`s that together exceed the chosen node's capacity so Kubernetes queues the second one until the first releases resources.
+
+Hard rules (breaking any = infeasibility score)
+-----------------------------------------------
+- Do not change a job's `image` value.
+- Do not change the top-level keys `jobs` / `schedule`, do not rename a job.
+- Do not put `parsec-radix` on node-b-4core.
+- Do not submit a job twice or forget a job.
+- Do not add new DSL verbs beyond `submit` / `sleep`.
+
+Feedback you receive after each iteration
+-----------------------------------------
+The evaluator returns the following artifacts along with the numeric score; use them to inform the next mutation:
+
+- `min_p95_us`, `mean_p95_us`, `max_p95_us`: memcached p95 latency in microseconds across the measurement rows taken while your batch jobs ran. SLO is 1000 μs.
+- `slo_headroom_us`: `1000 - max_p95_us`. Positive = headroom; zero/negative = you already violated. A large positive headroom (e.g. > 400 μs) means you left speed on the table — push harder: co-locate more on node-b, raise thread counts, or overlap submissions. Small headroom (< 100 μs) means back off.
+- `per_pod_summary`: a table in the form
+        job                     node                wait (s)   run (s)   total (s)   Δrun (s)
+        ------------------------------------------------------------------------------------------
+        parsec-blackscholes     node-b-4core-xkbd        2.0     141.0       143.0      +12.4
+        ...
+        ------------------------------------------------------------------------------------------
+        MAKESPAN (wall)                                                        188.0
+        p95 min/avg/max (us) : 304 / 417 / 491
+  `wait` = Pending + image-pull time (long wait = resource request too big or node full); `run` = actual execution; `total` = wait + run. `Δrun (s)` is signed vs the previous iteration (`+` = this job got slower, `-` = faster) — use it to attribute regressions to specific pods rather than guessing. The final `MAKESPAN (wall)` row is what the score is based on.
+- `slowness_breakdown`: a per-pod table of `observed / baseline / ratio / excess / state`. `baseline` is the solo-on-that-node runtime from table (2) below; `excess = max(0, observed - baseline)`. Rows with ratio > 1.5× or large `excess` are the jobs dragging the score down — either they were co-scheduled with a bad neighbour, pinned/starved of CPU, or given too few threads. Drive the excess column toward zero.
+- `total_excess_s`: sum of the `excess` column. This is the second term of the score, on equal footing with makespan. Two schedules with the same makespan but different excess totals are NOT equivalent — the one with lower excess is strictly better.
+- `stuck_jobs`: semicolon-separated list of jobs that were still Running/Pending/Failed when the evaluator gave up (soft-deadline branch). Empty on a healthy run. Non-empty means you MUST restructure the schedule so those jobs complete — their observed_s grows without bound otherwise.
+- `ooms`: pods killed by the Linux OOM killer. Non-empty = that pod's `memory_limit`, or the memory pressure on its node, was too tight.
+
+Exploration
+-----------
+The seed scheduler.yaml is one valid point in the search space; it is not a target. 
+Your previous runs plateaued with large SLO headroom (>400 μs max_p95 under 600 μs): that means there is speed to be won. 
+Radically reordering the schedule, moving jobs between nodes, changing thread counts, inserting or removing `sleep`s, and packing more concurrent submissions on a node are all fair game whenever `slo_headroom_us` is large. 
+Candidate structural moves include: starting two heavy node-a jobs overlapped instead of sequentially, co-locating a second small job on node-b alongside whatever is already there, giving the node-a stragglers more threads, or moving a job that currently waits a long time to the other node. 
+Do not stay close to the seed just because it works — look for a structural win and trade part of the headroom for speed. 
