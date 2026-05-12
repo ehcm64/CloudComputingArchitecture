@@ -65,6 +65,7 @@ echo '  -s ${MEMCACHED_INTERNAL_IP} \\'
 echo '  -a ${AGENT_INTERNAL_IP} \\'
 echo '  --noload -T 8 -C 8 -D 4 -Q 1000 -c 8 -t 1800 \\'
 echo '  --qps_interval 15 --qps_min 5000 --qps_max 110000 \\'
+echo '  --qps_seed 2345 \\'
 echo '  > ~/mcperf_results.txt 2>&1'
 echo ' remove the last line not to redirect!'
 

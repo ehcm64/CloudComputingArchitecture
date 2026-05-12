@@ -3,6 +3,7 @@ import subprocess
 import time
 import csv
 import psutil
+from datetime import datetime
 from scheduler_logger import SchedulerLogger, Job
 
 PARSEC_JOBS = [
@@ -122,11 +123,15 @@ def start_parsec(job_name, image, cores, threads):
 def set_job_cores(container_name, cores):
     core_str = ",".join(str(c) for c in cores)
 
-    subprocess.check_call([
-        "sudo", "docker", "update",
-        "--cpuset-cpus=" + core_str,
-        container_name
-    ])
+    try:
+        subprocess.check_call([
+            "sudo", "docker", "update",
+            "--cpuset-cpus=" + core_str,
+            container_name
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        print(f"[WARNING] Could not update cores for {container_name} (it may have just finished).")
+
 
 
 def is_job_running(container_name):
@@ -201,6 +206,11 @@ def take_decision(cpu, state, memcached_pid, logger):
 
 def main():
     logger = SchedulerLogger()
+    
+    # Initialize separate file for CPU utilization
+    cpu_file_name = logger.get_file_name().replace("log", "cpu_").replace(".txt", ".csv")
+    cpu_file = open(cpu_file_name, "w")
+    cpu_file.write("timestamp,core0,core1,core2,core3\n")
 
     memcached_pid = get_memcached_pid()
 
@@ -209,8 +219,16 @@ def main():
 
     logger.job_start(Job.MEMCACHED, memcached_cores, initial_threads=2)
   
+    # Initialize psutil cpu percent
+    psutil.cpu_percent(interval=None, percpu=True)
+
     try:
         while True:
+            # Record per-core cpu usage over the last loop iteration interval
+            percpu = psutil.cpu_percent(interval=None, percpu=True)
+            cpu_file.write(f"{datetime.now().isoformat()},{','.join(map(str, percpu))}\n")
+            cpu_file.flush()
+
             cpu = get_memcached_cpu(memcached_pid)
             take_decision(cpu, state, memcached_pid, logger)
             time.sleep(2)
@@ -221,7 +239,9 @@ def main():
     finally:
         logger.job_end(Job.MEMCACHED)
         logger.end()
+        cpu_file.close()
         print(f"Log written to: {logger.get_file_name()}")
+        print(f"CPU usage written to: {cpu_file_name}")
 
 if __name__ == "__main__":
     main()

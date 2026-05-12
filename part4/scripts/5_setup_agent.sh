@@ -163,13 +163,15 @@ echo "OK mcperf built"
 '
 
 
-$SSH ubuntu@"$AGENT_VM"
-echo ""
-echo "OK Agent setup complete!"
-echo ""
-echo "════════════════════════════════════════════════════════"
-echo "Run:"
-echo ""
-echo "   ~/memcache-perf-dynamic/mcperf -T 8 -A"
-echo "════════════════════════════════════════════════════════"
-echo ""
+$SSH ubuntu@"$AGENT_VM" -- "
+echo ''
+echo 'OK Agent setup complete!'
+echo ''
+echo '════════════════════════════════════════════════════════'
+echo 'Run:'
+echo ''
+echo '   ~/memcache-perf-dynamic/mcperf -T 8 -A'
+echo '════════════════════════════════════════════════════════'
+echo ''
+bash
+"

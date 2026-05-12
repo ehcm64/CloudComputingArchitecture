@@ -46,6 +46,19 @@ fi
 
 echo "OK Docker ready: $(docker --version)"
 
+echo "Pulling images..."
+sudo docker pull anakli/cca:splash2x_radix
+sudo docker pull anakli/cca:parsec_streamcluster
+sudo docker pull anakli/cca:parsec_vips
+sudo docker pull anakli/cca:splash2x_barnes
+sudo docker pull anakli/cca:parsec_blackscholes
+sudo docker pull anakli/cca:parsec_canneal
+sudo docker pull anakli/cca:parsec_freqmine
+
+
+echo "Pulling images complete"
+echo
+
 chmod +x scheduler.py
 
 echo "Setup complete"
