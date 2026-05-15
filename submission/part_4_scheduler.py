@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
 import time
-import csv
 import psutil
 from datetime import datetime
 from scheduler_logger import SchedulerLogger, Job
@@ -61,8 +60,6 @@ state = {
 
 
 CPU_HIGH = 140.0
-# CPU_LOW = 70.0
-# TIME = 5
 
 def get_memcached_pid():
     try:
@@ -148,7 +145,6 @@ def policy2(cpu, state, memcached_pid, logger):
     job   = state["current_parsec"]
     queue = state["job_queue"]
 
-    # ── 1. Adjust memcached cores based on CPU pressure ───────────────────
     n_mem_cores = len(state["memcached_cores"])
 
     if cpu > CPU_HIGH and n_mem_cores != 3:
@@ -167,7 +163,6 @@ def policy2(cpu, state, memcached_pid, logger):
 
 
     elif cpu < CPU_HIGH and n_mem_cores != 2:
-        # Give memcached one more core, shrink batch allocation
         new_mem_cores   = list([0, 1])   
         new_parsec_cores = list([2, 3]) 
         print(f"[DECISION] CPU {cpu:.1f}% new memcached cores: {new_mem_cores}")
@@ -214,17 +209,15 @@ def main():
 
     memcached_pid = get_memcached_pid()
 
-    memcached_cores = [0, 1, 2]  ### CHANGED FOR TESTS
+    memcached_cores = [0, 1, 2]
     set_cpu_affinity(memcached_pid, memcached_cores)
 
     logger.job_start(Job.MEMCACHED, memcached_cores, initial_threads=2)
   
-    # Initialize psutil cpu percent
     psutil.cpu_percent(interval=None, percpu=True)
 
     try:
         while True:
-            # Record per-core cpu usage over the last loop iteration interval
             percpu = psutil.cpu_percent(interval=None, percpu=True)
             cpu_file.write(f"{datetime.now().isoformat()},{','.join(map(str, percpu))}\n")
             cpu_file.flush()
